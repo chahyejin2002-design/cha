@@ -58,24 +58,42 @@ def _apply_secrets_to_env() -> None:
 _apply_secrets_to_env()
 
 
-def _setup_logging() -> logging.Logger:
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    log_name = f"multiusers_{datetime.now().strftime('%Y%m%d')}.log"
-    log_path = LOG_DIR / log_name
+def _writable_log_dir() -> Path | None:
+    """Return a writable log directory (repo logs locally, /tmp on Streamlit Cloud)."""
+    for candidate in (LOG_DIR, Path(tempfile.gettempdir()) / "multiusers_logs"):
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            probe = candidate / ".write_probe"
+            probe.write_text("", encoding="utf-8")
+            probe.unlink(missing_ok=True)
+            return candidate
+        except OSError:
+            continue
+    return None
 
+
+def _setup_logging() -> logging.Logger:
     root = logging.getLogger()
     root.handlers.clear()
     root.setLevel(logging.WARNING)
 
     fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-    fh = logging.FileHandler(log_path, encoding="utf-8")
-    fh.setLevel(logging.WARNING)
-    fh.setFormatter(fmt)
     ch = logging.StreamHandler()
     ch.setLevel(logging.WARNING)
     ch.setFormatter(fmt)
-    root.addHandler(fh)
     root.addHandler(ch)
+
+    log_dir = _writable_log_dir()
+    if log_dir is not None:
+        log_name = f"multiusers_{datetime.now().strftime('%Y%m%d')}.log"
+        log_path = log_dir / log_name
+        try:
+            fh = logging.FileHandler(log_path, encoding="utf-8")
+            fh.setLevel(logging.WARNING)
+            fh.setFormatter(fmt)
+            root.addHandler(fh)
+        except OSError:
+            pass
 
     for name in ("httpx", "httpcore", "urllib3", "openai", "langchain", "langchain_openai"):
         logging.getLogger(name).setLevel(logging.WARNING)
